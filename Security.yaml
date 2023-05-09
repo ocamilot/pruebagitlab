@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to deploy  Security
+
+Parameters:
+  VpcId:
+    Description: "VPC ID for Security Group"
+    Type: String
+  pCIDRtoAccess:
+    Description: "CIDR or your public IP Address to access the cluster ex. 180.111.211.123/32 (curl ifconfig.me), Avoid to use 0.0.0.0/0"
+    Type: String
+    Default: 1.1.1.1/32
+
+Resources:
+## Security
+
+## Securuty Group LoadBalancer External
+  rELBExternalCouchDBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ["", [!Ref 'AWS::StackName' , "-securituygroup-loadbalancer-external"]]
+      GroupDescription: "Allow CouchDB traffic  - External LoadBalancer"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Join ["", [!Ref 'AWS::StackName' , "-loadbalancer-external"]]
+  
+  rHTTPSExternalPortSG:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt rELBExternalCouchDBSG.GroupId
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: !Ref pCIDRtoAccess
+      Description: Allow CIDR Block
+
+## Security Group EC2 Cluster
+  rEC2CouchDBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ["", [!Ref 'AWS::StackName' , "-securitygroup-cluster"]]
+      GroupDescription: "Allow CouchDB traffic - Intra-Cluster"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Join ["", [!Ref 'AWS::StackName' , "-securitygroup-cluster"]]
+  
+  rSGInSubnetApp1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      GroupId: !GetAtt rEC2CouchDBSG.GroupId
+      IpProtocol: tcp
+      FromPort: '5984'
+      ToPort: '5984'
+      SourceSecurityGroupId: !Ref rEC2CouchDBSG
+      Description: 'Port 5984 HTTP'
+
+  rSGInSubnetApp2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      GroupId: !GetAtt rEC2CouchDBSG.GroupId
+      IpProtocol: tcp
+      FromPort: '5986'
+      ToPort: '5986'
+      SourceSecurityGroupId: !Ref rEC2CouchDBSG
+      Description: 'Port 5986'
+
+  rSGInSubnetApp3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      GroupId: !GetAtt rEC2CouchDBSG.GroupId
+      IpProtocol: tcp
+      FromPort: '9100'
+      ToPort: '9100'
+      SourceSecurityGroupId: !Ref rEC2CouchDBSG
+      Description: 'Port 9100-9200'
+
+  rSGInSubnetApp4:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      GroupId: !GetAtt rEC2CouchDBSG.GroupId
+      IpProtocol: tcp
+      FromPort: '4369'
+      ToPort: '4369'
+      SourceSecurityGroupId: !Ref rEC2CouchDBSG
+      Description: 'Port 4369-4369'
+
+  rSGInSubnetELB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      GroupId: !GetAtt rEC2CouchDBSG.GroupId
+      IpProtocol: tcp
+      FromPort: '5984'
+      ToPort: '5984'
+      SourceSecurityGroupId: !Ref rELBExternalCouchDBSG
+      Description: 'Port 5984 HTTP'
