@@ -1,0 +1,233 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to deploy a CouchDB Cluster and Load Balancer
+
+Parameters:
+  pInstanceType: 
+    Description: "Specify the Instance type of the stack."
+    Type: String
+    Default: t3a.medium
+  pVolumeSize:
+    Type: Number
+    Description: "Specify the volume size for data"
+    Default: 50
+  pIops:
+    Type: Number
+    Description: "IOPS to additional Volume"
+    Default: 3000
+  #pCouchDBVersion:
+  #  Description: "Version to use on CouchDB the latest version tested is 3.2.2.4"
+  #  Type: String
+  #  Default: 3.2.2.4
+  PubSubnetZoneA:
+    Description: "Private subnet zona A"
+    Type: String
+  PubSubnetZoneB:
+    Description: "Private subnet zona B"
+    Type: String
+  PubSubnetZoneC:
+    Description: "Private subnet zona B"
+    Type: String
+  rEC2CouchDBSG:
+    Description: "EC2 Couch DB SG"
+    Type: String
+
+Mappings:
+    RegionMap: 
+        us-east-1:
+          HVM64: ami-03e0b06f01d45a4eb
+        us-east-2:
+          HVM64: ami-043a959d257582dca
+        ca-central-1:
+          HVM64: ami-04c12937e87474def
+
+Resources:
+## SecretManager CouchDB Admin
+  rCouchDBAdminUserSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: !Join ["", [!Ref 'AWS::StackName' , "-admin-user"]]
+      Description: "Secreto para almacenar las credenciales del administrador de CouchDB"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 20
+        ExcludeCharacters: ^[A-Za-z]$+/"#@/\&?<>%*|()~[]`-{}.:,;=!\'
+
+## IAM Role and Profile Instance
+  rEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref 'AWS::StackName'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com 
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - ec2:Describe*
+                  - ec2:CreateTags
+                Resource: "*"
+                Effect: "Allow"
+          PolicyName: !Join ["", [!Ref 'AWS::StackName' , "-tags-policy"]]
+
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: arn:aws:logs:*:*:*
+                Effect: Allow
+          PolicyName: !Join ["", [!Ref 'AWS::StackName' , "-cloudwatch-policy"]]
+
+        - PolicyDocument:
+            Version: "2012-10-17" 
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - Ref: rCouchDBAdminUserSecret
+          PolicyName: !Join ["", [!Ref 'AWS::StackName' , "-secretmanager-policy"]]
+
+  rEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - Ref: rEC2Role
+      InstanceProfileName: !Join ["", [!Ref 'AWS::StackName' , "-iam-instance-profile"]]
+
+## EC2 Instances CouchDB Cluster
+  rCouchDBInstance01:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", HVM64]
+      InstanceType: !Ref pInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            VolumeSize: 60
+            VolumeType: gp3
+        - DeviceName: /dev/xvdf
+          Ebs:
+            Encrypted: true
+            VolumeSize: !Ref pVolumeSize
+            VolumeType: gp3
+            Iops: !Ref pIops
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !Ref PubSubnetZoneA
+          GroupSet:
+            - !Ref rEC2CouchDBSG
+      IamInstanceProfile: !Ref rEC2InstanceProfile
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install httpd -y
+          echo "<html><body><h1>Hello SERVER 1</h1></body></html>" >/var/www/html/index.html
+          systemctl start httpd
+          systemctl enable httpd
+          systemctl stop httpd
+          sudo sed --i 's/80/5984/' /etc/httpd/conf/httpd.conf
+          systemctl start httpd
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Node01
+      
+
+  rCouchDBInstance02:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", HVM64]
+      InstanceType: !Ref pInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            VolumeSize: 60
+            VolumeType: gp3
+        - DeviceName: /dev/xvdf
+          Ebs:
+            Encrypted: true
+            VolumeSize: !Ref pVolumeSize
+            VolumeType: gp3
+            Iops: !Ref pIops
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !Ref PubSubnetZoneB
+          GroupSet:
+            - !Ref rEC2CouchDBSG
+      IamInstanceProfile: !Ref rEC2InstanceProfile
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install httpd -y
+          echo "<html><body><h1>Hello SERVER 2</h1></body></html>" >/var/www/html/index.html
+          systemctl start httpd
+          systemctl enable httpd
+          systemctl stop httpd
+          sudo sed --i 's/80/5984/' /etc/httpd/conf/httpd.conf
+          systemctl start httpd
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Node02
+
+  rCouchDBInstance03:
+    Type: AWS::EC2::Instance
+    DependsOn: rCouchDBInstance02
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", HVM64]
+      InstanceType: !Ref pInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            VolumeSize: 60
+            VolumeType: gp3
+        - DeviceName: /dev/xvdf
+          Ebs:
+            Encrypted: true
+            VolumeSize: !Ref pVolumeSize
+            VolumeType: gp3
+            Iops: !Ref pIops
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !Ref PubSubnetZoneC
+          GroupSet:
+            - !Ref rEC2CouchDBSG
+      IamInstanceProfile: !Ref rEC2InstanceProfile
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install httpd -y
+          echo "<html><body><h1>Hello SERVER 3</h1></body></html>" >/var/www/html/index.html
+          systemctl start httpd
+          systemctl enable httpd
+          systemctl stop httpd
+          sudo sed --i 's/80/5984/' /etc/httpd/conf/httpd.conf
+          systemctl start httpd
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Node03
